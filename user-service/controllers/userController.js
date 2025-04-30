@@ -1,16 +1,19 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const mongoose = require('mongoose');
+const cors = require('cors');
 
-const register = async function(req, res) {
+
+const register = async function (req, res) {
     try {
-        const { username, email, password } = req.body;
+        const { name, email, password } = req.body;
 
-        if (!username || !email || !password) {
+        if (!name || !email || !password) {
             return res.status(400).json({ message: 'All fields are required.' });
         }
 
-        const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+        const existingUser = await User.findOne({ $or: [{ name }, { email }] });
         if (existingUser) {
             return res.status(409).json({ message: 'Username or email already in use.' });
         }
@@ -18,9 +21,9 @@ const register = async function(req, res) {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const newUser = new User({
-            username,
+            name,
             email,
-            password: hashedPassword,
+            password_hash: hashedPassword,
         });
 
         await newUser.save();
@@ -31,7 +34,7 @@ const register = async function(req, res) {
     }
 };
 
-const login = async function(req, res) {
+const login = async function (req, res) {
     try {
         const { email, password } = req.body;
 
@@ -42,32 +45,32 @@ const login = async function(req, res) {
         const user = await User.findOne({ email });
         if (!user) return res.status(401).json({ message: 'Invalid email or password.' });
 
-        const isMatch = await bcrypt.compare(password, user.password);
+        const isMatch = await bcrypt.compare(password, user.password_hash);
         if (!isMatch) return res.status(401).json({ message: 'Invalid email or password.' });
 
         const accessToken = jwt.sign(
             { userId: user._id },
             process.env.JWT_SECRET,
-            { expiresIn: '1min' }
+            { expiresIn: '15m' }
         );
 
         const refreshToken = jwt.sign(
             { userId: user._id },
             process.env.JWT_REFRESH_SECRET,
-            { expiresIn: '1day' }
+            { expiresIn: '1d' }
         );
 
         res.cookie('accessToken', accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            maxAge: 60000,
-            sameSite: process.env.NODE_ENV === "production" ? 'Strict' : 'lax',
+            maxAge: 15 * 60 * 1000, // 15 minutes
+            sameSite: process.env.NODE_ENV === "production" ? 'Strict' : 'Lax',
         });
 
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            maxAge: 86400000,
+            maxAge: 24 * 60 * 60 * 1000, // 1 day
             sameSite: process.env.NODE_ENV === "production" ? 'Strict' : 'Lax',
         });
 
@@ -94,7 +97,7 @@ const logout = (req, res) => {
     res.status(200).json({ message: 'Logged out successfully.' });
 };
 
-const refreshAccessToken = async function(req, res) {
+const refreshAccessToken = async function (req, res) {
     const refreshToken = req.cookies.refreshToken;
     if (!refreshToken) {
         return res.status(401).json({ message: 'Refresh token is required.' });
@@ -104,16 +107,20 @@ const refreshAccessToken = async function(req, res) {
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
         const user = await User.findById(decoded.userId);
 
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
         const accessToken = jwt.sign(
-            { userId: user._id, username: user.username },
+            { userId: user._id },
             process.env.JWT_SECRET,
-            { expiresIn: '1min' }
+            { expiresIn: '15m' }
         );
 
         res.cookie('accessToken', accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            maxAge: 60 * 1000,
+            maxAge: 15 * 60 * 1000, // 15 minutes
             sameSite: process.env.NODE_ENV === "production" ? 'Strict' : 'Lax',
         });
 
@@ -124,4 +131,4 @@ const refreshAccessToken = async function(req, res) {
     }
 };
 
-module.exports = { register, login, logout, refreshAccessToken }
+module.exports = { register, login, logout, refreshAccessToken };
